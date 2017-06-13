@@ -53,13 +53,16 @@ public:
   // 主要接口
   // @fn: 任务的function
   // @ctx: 执行环境
-  // @read_vars: 读取而不修改的Var
-  // @write_vars: 修改的Var
   // @profiled: 是否需要记录执行信息
+  // Usage：
+  //    fn = NewFunc(...)
+  //    PushAsync(fn, ...)
   virtual void PushAsync(FnHandle fn, ExecContext ctx,
                          bool profiled = false) = 0;
 
   // 创建新的Function任务
+  // @read_vars: 读取而不修改的Var
+  // @write_vars: 修改的Var
   virtual FnHandle NewFunc(AsyncFn fn, const vector<VarHandle> &read_vars,
                            const vector<VarHandle> &write_vars) = 0;
 
