@@ -132,10 +132,75 @@ virtual void Push(OprHandle op, Context exec_ctx) = 0;
 # 代码实现
 ## 代码结构
 
-| mxnet/include/engine.h | engine对外接口 |
-| mxnet/engine/engine.cc |                |
-|                        |                |
+| mxnet/include/engine.h | engine对外接口        |
+| mxnet/engine/engine.cc | engine 的工厂接口实现 |
+| mxnet/engine/engine_impl.h | engine 的工厂接口声明 |
 
 ---
+### OprBlock 记录push 到 engine 中的 Opr 信息
+```c++
+struct OprBlock : public common::ObjectPoolAllocatable<OprBlock> {
+  // 等待的参数数目
+  std::atomic<int> wait{0};
+  /*! \brief Pointer to information on performing real operation */
+  ThreadedOpr* opr{nullptr};
+  /*! \brief The context this operator */
+  Context ctx;
+  /*! \brief priority of the function */
+  int priority;
+  /*! \brief indicate whether to profile this operator */
+  bool profiling{false};
+  /*! \brief operator execution statistics */
+  OprExecStat *opr_stat;
+  // define possible debug information
+  DEFINE_ENGINE_DEBUG_INFO(OprBlock);
+  /*!
+   * \brief call this function to decrease the wait counter.
+   * \return the wait counter after the decreasement.
+   */
+  inline int decr_wait() {
+    // chack invariant, avoid over trigger
+    int ret = --wait;
+    CHECK_GE(ret, 0);
+    return ret;
+  }
+};  // struct OprBlock
+```
+---
+### ThreadVar 管理依赖关系
+#### Read
+```c++
+inline void ThreadedVar::AppendReadDependency(OprBlock* opr_block) {
+  std::lock_guard<std::mutex> lock{m_};
+  // 如果该 var 之前没有 write 操作，则可以直接read
+  if (pending_write_ == nullptr) {
+    // invariant: is_ready_to_read()
+    CHECK_GE(num_pending_reads_, 0);
+    // STATE CHANGE
+    ++num_pending_reads_;
+    // decrease wait counter
+    // 告知  opr 该参数依赖 ready
+    opr_block->decr_wait();
+  } else {
+  // 否则需要 append 到队列中
+    auto&& new_var_block = VersionedVarBlock::New();
+    assert(head_->next == nullptr);
+    assert(head_->trigger == nullptr);
+    assert(head_->write == false);
+    // append things to next.
+    head_->next = new_var_block;
+    head_->trigger = opr_block;
+    head_ = new_var_block;
+  }
+}
+```
+
+https://github.com/dmlc/mxnet/blob/master/src/engine/threaded_engine.cc#L32
+
+### ThreadVar 管理依赖关系
+#### Read
+
+
+
 # 参考文献
 1. [mxnet overview](http://mxnet.io/architecture/overview.html)

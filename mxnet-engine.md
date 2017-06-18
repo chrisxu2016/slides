@@ -765,11 +765,17 @@ inline Engine* CreateEngine() {
   return ret;
 }
 ```
-
+---
 ## Engine 在mxnet中的使用
-
 ### 相关资源的协调
+以下三种资源使用Engine::Var管理
 
+- [Resource](http://www.superjom.xyz/mxnetcode/codebrowser/include/mxnet/resource.h.html#mxnet::Resource)
+  - Temp Space，临时空间
+  - Random， 随机数生成器
+- [NDarray::Chunk](http://www.superjom.xyz/mxnetcode/codebrowser/include/mxnet/ndarray.h.html#_ZN5mxnet7NDArray5ChunkC1Ev)，NDArray 存储的内存块
+
+---
 - [Resource](http://www.superjom.xyz/mxnetcode/codebrowser/include/mxnet/resource.h.html#mxnet::Resource)
 
 ```c++
@@ -779,5 +785,57 @@ struct ResourceRequest {
     kTempSpace
   };
 };
-```
 
+struct Resurce {
+  ResourceRequest req;
+  engine::VarHandle var;
+};
+```
+- [NDarray::Chunk](http://www.superjom.xyz/mxnetcode/codebrowser/include/mxnet/ndarray.h.html#_ZN5mxnet7NDArray5ChunkC1Ev)
+
+```c++
+struct Chunk {
+ Chunk() : static_data(true), delay_alloc(false) {
+      var  = Engine::Get()->NewVariable();
+    }
+};
+```
+---
+## Engine 在mxnet中使用
+
+### ndarray
+- 每个op 都会用 `Engine::Get()->PushSync` 执行具体的计算
+  - 可参考其中 [NDArray::BinaryOp](http://www.superjom.xyz/mxnetcode/codebrowser/src/ndarray/ndarray.cc.html#215)
+- CPU <-> GPU 内存复制
+  - 参考[NDArray::CopyFromTo](http://www.superjom.xyz/mxnetcode/codebrowser/src/ndarray/ndarray.cc.html#_ZN5mxnet10CopyFromToERKNS_7NDArrayEPS0_i)
+
+
+---
+### GraphExecutor
+
+- Graph中所有op使用engine 执行
+    - 参考 [GraphExecutor::RunOps](http://www.superjom.xyz/mxnetcode/codebrowser/src/executor/graph_executor.cc.html#1217)
+
+    ```c++
+    for (size_t nid = topo_start; nid < topo_end; ++nid) {
+      // ...
+      Engine::Get()->Push(seg_op.opr, seg_op.ctx, 0, profiling);
+      // ...
+    }
+    ```
+
+---
+### KVStore
+- 参数服务器中 Pull/ Push 中使用engine执行
+  - 参考  [KVStoreDist::Push](https://github.com/dmlc/mxnet/blob/master/src/kvstore/kvstore_dist.h#L82)
+
+```c++
+    CHECK_NOTNULL(Engine::Get())->PushAsync(
+        pull_from_servers,
+        pinned_ctx_,
+        {},
+        {recv_buf.var()},
+        FnProperty::kNormal,
+        priority,
+        PROFILER_MESSAGE("KVStoreDistPull"));
+```
